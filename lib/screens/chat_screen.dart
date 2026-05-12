@@ -1,8 +1,9 @@
 import 'dart:async';
+import 'dart:isolate';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
-import '../services/vodafone_service.dart';
+import '../services/chat_service.dart';
 
 class ChatMessage {
   final String text;
@@ -31,9 +32,9 @@ class _ChatScreenState extends State<ChatScreen> {
   String? _chatId;
   bool _connecting = true;
   bool _agentJoined = false;
-  bool _ended = false;
-  int _lastPosition = 0;
-  bool _loopRunning = false;
+  Isolate? _isolate;
+  ReceivePort? _port;
+  StreamSubscription? _sub;
 
   @override
   void initState() {
@@ -43,67 +44,38 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Future<void> _startChat() async {
     try {
-      _chatId = await VodafoneService.createChatSession();
-      await VodafoneService.joinChat(
+      _chatId = await ChatService.createSession();
+      await ChatService.joinChat(
         chatId: _chatId!,
         firstName: widget.firstName,
         lastName: widget.lastName,
         phone: widget.phone,
         tariff: widget.tariff,
       );
-      _loopRunning = true;
-      _pollLoop();
+
+      final result = await ChatService.startPolling(_chatId!);
+      _port = result.port;
+      _isolate = result.isolate;
+
+      _sub = _port!.listen((msg) {
+        if (!mounted) return;
+        final type = msg['type'];
+        if (type == 'joined') {
+          setState(() {
+            _agentJoined = true;
+            _connecting = false;
+          });
+        } else if (type == 'message') {
+          setState(() {
+            _messages.add(ChatMessage(text: msg['text'], isUser: false));
+          });
+          _scrollDown();
+        } else if (type == 'disconnected') {
+          setState(() => _connecting = false);
+        }
+      });
     } catch (e) {
       if (mounted) setState(() => _connecting = false);
-    }
-  }
-
-  // loop مستمرة زي البوت بالظبط
-  Future<void> _pollLoop() async {
-    while (_loopRunning && mounted) {
-      try {
-        final data = await VodafoneService.refreshChat(_chatId!, _lastPosition);
-        if (!mounted || !_loopRunning) break;
-
-        if (data['transcriptPosition'] != null) {
-          _lastPosition = data['transcriptPosition'];
-        }
-
-        final transcript = data['transcriptToShow'];
-        if (transcript != null) {
-          bool changed = false;
-
-          for (final msg in transcript) {
-            if (msg is! List || msg.isEmpty) continue;
-
-            if (msg[0] == 'Notice.Joined' && !_agentJoined) {
-              _agentJoined = true;
-              _connecting = false;
-              changed = true;
-            }
-
-            if (msg.length >= 5 &&
-                msg[0] == 'Message.Text' &&
-                msg[4] == 'AGENT') {
-              _messages.add(ChatMessage(
-                text: msg[2].toString(),
-                isUser: false,
-              ));
-              changed = true;
-            }
-          }
-
-          if (changed && mounted) {
-            setState(() {});
-            _scrollDown();
-          }
-        }
-      } catch (_) {
-        // ignore — بيحاول تاني فوراً
-      }
-
-      // 1.5 ثانية زي البوت
-      await Future.delayed(const Duration(milliseconds: 1500));
     }
   }
 
@@ -116,15 +88,15 @@ class _ChatScreenState extends State<ChatScreen> {
     });
     _scrollDown();
     try {
-      await VodafoneService.sendMessage(_chatId!, text);
+      await ChatService.sendMessage(_chatId!, text);
     } catch (_) {}
   }
 
   Future<void> _endChat() async {
-    _loopRunning = false;
-    try {
-      if (_chatId != null) await VodafoneService.disconnect(_chatId!);
-    } catch (_) {}
+    _sub?.cancel();
+    _isolate?.kill(priority: Isolate.immediate);
+    _port?.close();
+    if (_chatId != null) await ChatService.disconnect(_chatId!);
     if (mounted) Navigator.pop(context);
   }
 
@@ -142,7 +114,9 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   void dispose() {
-    _loopRunning = false;
+    _sub?.cancel();
+    _isolate?.kill(priority: Isolate.immediate);
+    _port?.close();
     _msgCtrl.dispose();
     _scrollCtrl.dispose();
     super.dispose();
@@ -197,11 +171,8 @@ class _ChatScreenState extends State<ChatScreen> {
                       ),
                     ),
                     Text(
-                      _connecting
-                          ? 'جاري الاتصال...'
-                          : _agentJoined
-                              ? 'متصل'
-                              : 'في الانتظار...',
+                      _connecting ? 'جاري الاتصال...'
+                          : _agentJoined ? 'متصل' : 'في الانتظار...',
                       style: GoogleFonts.cairo(
                           fontSize: 11,
                           color: _agentJoined ? Colors.green : Colors.orange),
@@ -230,9 +201,7 @@ class _ChatScreenState extends State<ChatScreen> {
             Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(vertical: 10),
-              color: isDark
-                  ? const Color(0xFF1A1A1A)
-                  : const Color(0xFFFFF3F3),
+              color: isDark ? const Color(0xFF1A1A1A) : const Color(0xFFFFF3F3),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
@@ -262,19 +231,16 @@ class _ChatScreenState extends State<ChatScreen> {
                         const SizedBox(height: 12),
                         Text(
                           _agentJoined ? 'ابدأ المحادثة' : 'في الانتظار...',
-                          style: GoogleFonts.cairo(
-                              color: Colors.grey, fontSize: 15),
+                          style: GoogleFonts.cairo(color: Colors.grey, fontSize: 15),
                         ),
                       ],
                     ),
                   )
                 : ListView.builder(
                     controller: _scrollCtrl,
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 12),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                     itemCount: _messages.length,
-                    itemBuilder: (_, i) =>
-                        _MessageBubble(msg: _messages[i]),
+                    itemBuilder: (_, i) => _MessageBubble(msg: _messages[i]),
                   ),
           ),
 
@@ -293,17 +259,14 @@ class _ChatScreenState extends State<ChatScreen> {
                       decoration: BoxDecoration(
                         color: inputBg,
                         borderRadius: BorderRadius.circular(24),
-                        border: Border.all(
-                            color: Colors.grey.withOpacity(0.15)),
+                        border: Border.all(color: Colors.grey.withOpacity(0.15)),
                       ),
                       child: TextField(
                         controller: _msgCtrl,
-                        style: GoogleFonts.cairo(
-                            color: textColor, fontSize: 14),
+                        style: GoogleFonts.cairo(color: textColor, fontSize: 14),
                         decoration: InputDecoration(
                           hintText: 'اكتب رسالتك...',
-                          hintStyle: GoogleFonts.cairo(
-                              color: Colors.grey, fontSize: 14),
+                          hintStyle: GoogleFonts.cairo(color: Colors.grey, fontSize: 14),
                           border: InputBorder.none,
                           contentPadding: const EdgeInsets.symmetric(
                               horizontal: 16, vertical: 12),
@@ -346,16 +309,15 @@ class _MessageBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isUser = msg.isUser;
-    final bubbleColor =
-        isUser ? const Color(0xFF1565C0) : AppTheme.red;
+    final bubbleColor = isUser ? const Color(0xFF1565C0) : AppTheme.red;
 
     return Align(
       alignment: isUser ? Alignment.centerLeft : Alignment.centerRight,
       child: Container(
         margin: const EdgeInsets.only(bottom: 8),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        constraints: BoxConstraints(
-            maxWidth: MediaQuery.of(context).size.width * 0.75),
+        constraints:
+            BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
         decoration: BoxDecoration(
           color: bubbleColor,
           borderRadius: BorderRadius.only(
@@ -365,8 +327,7 @@ class _MessageBubble extends StatelessWidget {
             bottomRight: isUser ? const Radius.circular(16) : Radius.zero,
           ),
           boxShadow: [
-            BoxShadow(
-                color: bubbleColor.withOpacity(0.25), blurRadius: 8)
+            BoxShadow(color: bubbleColor.withOpacity(0.25), blurRadius: 8)
           ],
         ),
         child: Column(
