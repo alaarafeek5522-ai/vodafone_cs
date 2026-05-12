@@ -33,8 +33,7 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _agentJoined = false;
   bool _ended = false;
   int _lastPosition = 0;
-  Timer? _pollTimer;
-  bool _polling = false;
+  bool _loopRunning = false;
 
   @override
   void initState() {
@@ -52,55 +51,59 @@ class _ChatScreenState extends State<ChatScreen> {
         phone: widget.phone,
         tariff: widget.tariff,
       );
-      // polling كل 1.5 ثانية زي البوت الأصلي
-      _pollTimer = Timer.periodic(const Duration(milliseconds: 1500), (_) => _poll());
+      _loopRunning = true;
+      _pollLoop();
     } catch (e) {
       if (mounted) setState(() => _connecting = false);
     }
   }
 
-  Future<void> _poll() async {
-    if (_chatId == null || _ended || _polling) return;
-    _polling = true;
-    try {
-      final data = await VodafoneService.refreshChat(_chatId!, _lastPosition);
-      if (!mounted) return;
+  // loop مستمرة زي البوت بالظبط
+  Future<void> _pollLoop() async {
+    while (_loopRunning && mounted) {
+      try {
+        final data = await VodafoneService.refreshChat(_chatId!, _lastPosition);
+        if (!mounted || !_loopRunning) break;
 
-      if (data['transcriptPosition'] != null) {
-        _lastPosition = data['transcriptPosition'];
-      }
+        if (data['transcriptPosition'] != null) {
+          _lastPosition = data['transcriptPosition'];
+        }
 
-      final transcript = data['transcriptToShow'];
-      if (transcript != null) {
-        bool changed = false;
-        for (final msg in transcript) {
-          if (msg is! List || msg.isEmpty) continue;
+        final transcript = data['transcriptToShow'];
+        if (transcript != null) {
+          bool changed = false;
 
-          if (msg[0] == 'Notice.Joined' && !_agentJoined) {
-            _agentJoined = true;
-            _connecting = false;
-            changed = true;
+          for (final msg in transcript) {
+            if (msg is! List || msg.isEmpty) continue;
+
+            if (msg[0] == 'Notice.Joined' && !_agentJoined) {
+              _agentJoined = true;
+              _connecting = false;
+              changed = true;
+            }
+
+            if (msg.length >= 5 &&
+                msg[0] == 'Message.Text' &&
+                msg[4] == 'AGENT') {
+              _messages.add(ChatMessage(
+                text: msg[2].toString(),
+                isUser: false,
+              ));
+              changed = true;
+            }
           }
 
-          if (msg.length >= 5 &&
-              msg[0] == 'Message.Text' &&
-              msg[4] == 'AGENT') {
-            _messages.add(ChatMessage(
-              text: msg[2].toString(),
-              isUser: false,
-            ));
-            changed = true;
+          if (changed && mounted) {
+            setState(() {});
+            _scrollDown();
           }
         }
-        if (changed && mounted) {
-          setState(() {});
-          _scrollDown();
-        }
+      } catch (_) {
+        // ignore — بيحاول تاني فوراً
       }
-    } catch (_) {
-      // ignore timeout/network errors — بيحاول تاني
-    } finally {
-      _polling = false;
+
+      // 1.5 ثانية زي البوت
+      await Future.delayed(const Duration(milliseconds: 1500));
     }
   }
 
@@ -118,11 +121,10 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _endChat() async {
-    _pollTimer?.cancel();
+    _loopRunning = false;
     try {
       if (_chatId != null) await VodafoneService.disconnect(_chatId!);
     } catch (_) {}
-    setState(() => _ended = true);
     if (mounted) Navigator.pop(context);
   }
 
@@ -140,7 +142,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   void dispose() {
-    _pollTimer?.cancel();
+    _loopRunning = false;
     _msgCtrl.dispose();
     _scrollCtrl.dispose();
     super.dispose();
@@ -149,7 +151,6 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    // خلفية بيضاء في الـ light، داكنة في الـ dark
     final bg = isDark ? const Color(0xFF0A0A0A) : Colors.white;
     final appBarBg = isDark ? const Color(0xFF141414) : Colors.white;
     final inputBg = isDark ? const Color(0xFF1C1C1C) : const Color(0xFFF5F5F5);
@@ -162,8 +163,7 @@ class _ChatScreenState extends State<ChatScreen> {
         elevation: 0.5,
         shadowColor: Colors.grey.withOpacity(0.2),
         leading: IconButton(
-          icon: Icon(Icons.arrow_back_ios_rounded,
-              color: textColor, size: 20),
+          icon: Icon(Icons.arrow_back_ios_rounded, color: textColor, size: 20),
           onPressed: () => Navigator.pop(context),
         ),
         title: Row(
@@ -193,11 +193,7 @@ class _ChatScreenState extends State<ChatScreen> {
                       margin: const EdgeInsets.only(left: 4),
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        color: _connecting
-                            ? Colors.orange
-                            : _agentJoined
-                                ? Colors.green
-                                : Colors.orange,
+                        color: _agentJoined ? Colors.green : Colors.orange,
                       ),
                     ),
                     Text(
@@ -218,22 +214,18 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
         actions: [
           if (_agentJoined)
-            Padding(
-              padding: const EdgeInsets.only(left: 8),
-              child: TextButton(
-                onPressed: _endChat,
-                child: Text('إنهاء',
-                    style: GoogleFonts.cairo(
-                        color: AppTheme.red,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 14)),
-              ),
+            TextButton(
+              onPressed: _endChat,
+              child: Text('إنهاء',
+                  style: GoogleFonts.cairo(
+                      color: AppTheme.red,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 14)),
             ),
         ],
       ),
       body: Column(
         children: [
-          // شريط الانتظار
           if (_connecting)
             Container(
               width: double.infinity,
@@ -252,25 +244,27 @@ class _ChatScreenState extends State<ChatScreen> {
                   const SizedBox(width: 10),
                   Text('جاري البحث عن موظف...',
                       style: GoogleFonts.cairo(
-                          color: AppTheme.red, fontSize: 13,
+                          color: AppTheme.red,
+                          fontSize: 13,
                           fontWeight: FontWeight.w600)),
                 ],
               ),
             ),
 
-          // الرسائل
           Expanded(
-            child: _messages.isEmpty && !_connecting
+            child: _messages.isEmpty
                 ? Center(
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Icon(Icons.chat_bubble_outline_rounded,
-                            color: Colors.grey.withOpacity(0.4), size: 48),
+                            color: Colors.grey.withOpacity(0.3), size: 52),
                         const SizedBox(height: 12),
-                        Text('ابدأ المحادثة',
-                            style: GoogleFonts.cairo(
-                                color: Colors.grey, fontSize: 15)),
+                        Text(
+                          _agentJoined ? 'ابدأ المحادثة' : 'في الانتظار...',
+                          style: GoogleFonts.cairo(
+                              color: Colors.grey, fontSize: 15),
+                        ),
                       ],
                     ),
                   )
@@ -284,15 +278,13 @@ class _ChatScreenState extends State<ChatScreen> {
                   ),
           ),
 
-          // حقل الإرسال
           if (_agentJoined)
             Container(
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
               decoration: BoxDecoration(
                 color: appBarBg,
                 border: Border(
-                    top: BorderSide(
-                        color: Colors.grey.withOpacity(0.15))),
+                    top: BorderSide(color: Colors.grey.withOpacity(0.15))),
               ),
               child: Row(
                 children: [
@@ -354,7 +346,6 @@ class _MessageBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isUser = msg.isUser;
-    // المستخدم = أزرق غامق، الموظف = أحمر فودافون
     final bubbleColor =
         isUser ? const Color(0xFF1565C0) : AppTheme.red;
 
@@ -370,10 +361,8 @@ class _MessageBubble extends StatelessWidget {
           borderRadius: BorderRadius.only(
             topLeft: const Radius.circular(16),
             topRight: const Radius.circular(16),
-            bottomLeft:
-                isUser ? Radius.zero : const Radius.circular(16),
-            bottomRight:
-                isUser ? const Radius.circular(16) : Radius.zero,
+            bottomLeft: isUser ? Radius.zero : const Radius.circular(16),
+            bottomRight: isUser ? const Radius.circular(16) : Radius.zero,
           ),
           boxShadow: [
             BoxShadow(
@@ -393,9 +382,7 @@ class _MessageBubble extends StatelessWidget {
             const SizedBox(height: 2),
             Text(msg.text,
                 style: GoogleFonts.cairo(
-                    fontSize: 14,
-                    color: Colors.white,
-                    height: 1.4)),
+                    fontSize: 14, color: Colors.white, height: 1.4)),
           ],
         ),
       ),
