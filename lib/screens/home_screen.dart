@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
+import '../main.dart';
 import '../theme/app_theme.dart';
-import '../services/vodafone_service.dart';
 import 'chat_screen.dart';
 
 class HomeScreen extends StatelessWidget {
@@ -18,8 +19,13 @@ class HomeScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bg = isDark ? const Color(0xFF0A0A0A) : const Color(0xFFF5F5F5);
+    final cardBg = isDark ? const Color(0xFF141414) : Colors.white;
+    final textColor = isDark ? Colors.white : const Color(0xFF0A0A0A);
+
     return Scaffold(
-      backgroundColor: AppTheme.black,
+      backgroundColor: bg,
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 24),
@@ -27,8 +33,6 @@ class HomeScreen extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const SizedBox(height: 32),
-
-              // هيدر
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -37,40 +41,62 @@ class HomeScreen extends StatelessWidget {
                     children: [
                       Text('أهلاً،',
                           style: GoogleFonts.cairo(
-                              fontSize: 15, color: AppTheme.grey)),
+                              fontSize: 15, color: Colors.grey)),
                       Text('$firstName $lastName',
                           style: GoogleFonts.cairo(
                               fontSize: 22,
                               fontWeight: FontWeight.w800,
-                              color: AppTheme.white)),
+                              color: textColor)),
                     ],
                   ),
-                  Container(
-                    width: 48,
-                    height: 48,
-                    decoration: BoxDecoration(
-                      color: AppTheme.red,
-                      borderRadius: BorderRadius.circular(12),
-                      boxShadow: [
-                        BoxShadow(
-                            color: AppTheme.red.withOpacity(0.4),
-                            blurRadius: 20),
-                      ],
-                    ),
-                    child: const Icon(Icons.headset_mic_rounded,
-                        color: Colors.white, size: 26),
+                  Row(
+                    children: [
+                      // زرار الوضع الليلي
+                      GestureDetector(
+                        onTap: () =>
+                            context.read<ThemeProvider>().toggle(),
+                        child: Container(
+                          width: 40, height: 40,
+                          decoration: BoxDecoration(
+                            color: cardBg,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                                color: Colors.grey.withOpacity(0.2)),
+                          ),
+                          child: Icon(
+                            isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+                            color: isDark ? AppTheme.gold : Colors.blueGrey,
+                            size: 20,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Container(
+                        width: 48, height: 48,
+                        decoration: BoxDecoration(
+                          color: AppTheme.red,
+                          borderRadius: BorderRadius.circular(12),
+                          boxShadow: [
+                            BoxShadow(
+                                color: AppTheme.red.withOpacity(0.4),
+                                blurRadius: 20),
+                          ],
+                        ),
+                        child: const Icon(Icons.headset_mic_rounded,
+                            color: Colors.white, size: 26),
+                      ),
+                    ],
                   ),
                 ],
               ).animate().fadeIn(duration: 400.ms),
 
               const SizedBox(height: 28),
 
-              // كارد المعلومات
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
-                  gradient: LinearGradient(
+                  gradient: const LinearGradient(
                     colors: [AppTheme.red, AppTheme.darkRed],
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
@@ -97,10 +123,7 @@ class HomeScreen extends StatelessWidget {
                             color: Colors.white,
                             letterSpacing: 1)),
                     const SizedBox(height: 16),
-                    Container(
-                      height: 1,
-                      color: Colors.white.withOpacity(0.2),
-                    ),
+                    Container(height: 1, color: Colors.white.withOpacity(0.2)),
                     const SizedBox(height: 16),
                     Row(
                       children: [
@@ -116,10 +139,7 @@ class HomeScreen extends StatelessWidget {
                     ),
                   ],
                 ),
-              )
-                  .animate(delay: 150.ms)
-                  .fadeIn()
-                  .slideY(begin: 0.2),
+              ).animate(delay: 150.ms).fadeIn().slideY(begin: 0.2),
 
               const SizedBox(height: 32),
 
@@ -127,17 +147,12 @@ class HomeScreen extends StatelessWidget {
                   style: GoogleFonts.cairo(
                       fontSize: 18,
                       fontWeight: FontWeight.w700,
-                      color: AppTheme.white))
+                      color: textColor))
                   .animate(delay: 250.ms).fadeIn(),
 
               const SizedBox(height: 16),
 
-              // زرار Chat
-              _ServiceCard(
-                icon: Icons.chat_bubble_outline_rounded,
-                title: 'تواصل مع خدمة العملاء',
-                subtitle: 'محادثة مباشرة مع موظف',
-                delay: 300,
+              GestureDetector(
                 onTap: () => Navigator.push(
                   context,
                   MaterialPageRoute(
@@ -149,11 +164,51 @@ class HomeScreen extends StatelessWidget {
                     ),
                   ),
                 ),
-              ),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: cardBg,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                        color: Colors.grey.withOpacity(0.1)),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 48, height: 48,
+                        decoration: BoxDecoration(
+                          color: AppTheme.red.withOpacity(0.12),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Icon(Icons.chat_bubble_outline_rounded,
+                            color: AppTheme.red, size: 24),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('تواصل مع خدمة العملاء',
+                                style: GoogleFonts.cairo(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w700,
+                                    color: textColor)),
+                            Text('محادثة مباشرة مع موظف',
+                                style: GoogleFonts.cairo(
+                                    fontSize: 12, color: Colors.grey)),
+                          ],
+                        ),
+                      ),
+                      const Icon(Icons.arrow_forward_ios_rounded,
+                          color: Colors.grey, size: 16),
+                    ],
+                  ),
+                ),
+              ).animate(delay: 300.ms).fadeIn().slideX(begin: 0.2),
 
               const Spacer(),
 
-              // Team Ali
               Center(
                 child: Text('Team Ali',
                     style: GoogleFonts.dancingScript(
@@ -169,67 +224,5 @@ class HomeScreen extends StatelessWidget {
         ),
       ),
     );
-  }
-}
-
-class _ServiceCard extends StatelessWidget {
-  final IconData icon;
-  final String title, subtitle;
-  final VoidCallback onTap;
-  final int delay;
-
-  const _ServiceCard({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-    required this.onTap,
-    required this.delay,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: AppTheme.darkCard,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.white.withOpacity(0.07)),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 48,
-              height: 48,
-              decoration: BoxDecoration(
-                color: AppTheme.red.withOpacity(0.15),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(icon, color: AppTheme.red, size: 24),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title,
-                      style: GoogleFonts.cairo(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                          color: AppTheme.white)),
-                  Text(subtitle,
-                      style: GoogleFonts.cairo(
-                          fontSize: 12, color: AppTheme.grey)),
-                ],
-              ),
-            ),
-            const Icon(Icons.arrow_forward_ios_rounded,
-                color: AppTheme.grey, size: 16),
-          ],
-        ),
-      ),
-    ).animate(delay: Duration(milliseconds: delay)).fadeIn().slideX(begin: 0.2);
   }
 }

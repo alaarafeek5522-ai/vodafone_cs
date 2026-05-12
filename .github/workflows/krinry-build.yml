@@ -32,11 +32,25 @@ jobs:
       - name: Create android folder
         run: flutter create --platforms android .
 
+      - name: Copy icon to mipmap
+        run: |
+          for dir in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
+            cp assets/icon.png android/app/src/main/res/mipmap-${dir}/ic_launcher.png
+          done
+
+      - name: Add internet permission to manifest
+        run: |
+          sed -i 's|<manifest xmlns:android="http://schemas.android.com/apk/res/android">|<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n    <uses-permission android:name="android.permission.INTERNET"/>|' android/app/src/main/AndroidManifest.xml
+
       - name: Build APK
         run: flutter build apk --${{ github.event.inputs.build_type }}
+
+      - name: List APK
+        run: find build/ -name "*.apk"
 
       - uses: actions/upload-artifact@v4
         with:
           name: vodafone-cs-apk
-          path: build/app/outputs/flutter-apk/*.apk
+          path: build/app/outputs/flutter-apk/
+          if-no-files-found: warn
           retention-days: 7

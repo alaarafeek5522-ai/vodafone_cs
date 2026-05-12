@@ -61,8 +61,7 @@ class _ChatScreenState extends State<ChatScreen> {
   Future<void> _poll() async {
     if (_chatId == null || _ended) return;
     try {
-      final data =
-          await VodafoneService.refreshChat(_chatId!, _lastPosition);
+      final data = await VodafoneService.refreshChat(_chatId!, _lastPosition);
       if (data['transcriptPosition'] != null) {
         _lastPosition = data['transcriptPosition'];
       }
@@ -71,13 +70,10 @@ class _ChatScreenState extends State<ChatScreen> {
         for (final msg in transcript) {
           if (msg is List && msg.isNotEmpty) {
             if (msg[0] == 'Notice.Joined' && !_agentJoined) {
-              setState(() {
-                _agentJoined = true;
-                _connecting = false;
-              });
+              if (mounted) setState(() { _agentJoined = true; _connecting = false; });
             }
             if (msg.length >= 5 && msg[0] == 'Message.Text' && msg[4] == 'AGENT') {
-              setState(() {
+              if (mounted) setState(() {
                 _messages.add(ChatMessage(
                   text: msg[2].toString(),
                   isUser: false,
@@ -130,21 +126,24 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bg = isDark ? const Color(0xFF0A0A0A) : const Color(0xFFF5F5F5);
+    final cardBg = isDark ? const Color(0xFF141414) : Colors.white;
+
     return Scaffold(
-      backgroundColor: AppTheme.black,
+      backgroundColor: bg,
       appBar: AppBar(
-        backgroundColor: AppTheme.darkCard,
+        backgroundColor: cardBg,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_rounded,
-              color: Colors.white, size: 20),
+          icon: Icon(Icons.arrow_back_ios_rounded,
+              color: isDark ? Colors.white : Colors.black, size: 20),
           onPressed: () => Navigator.pop(context),
         ),
         title: Row(
           children: [
             Container(
-              width: 36,
-              height: 36,
+              width: 36, height: 36,
               decoration: BoxDecoration(
                 color: AppTheme.red,
                 borderRadius: BorderRadius.circular(10),
@@ -160,16 +159,12 @@ class _ChatScreenState extends State<ChatScreen> {
                     style: GoogleFonts.cairo(
                         fontSize: 15,
                         fontWeight: FontWeight.w700,
-                        color: Colors.white)),
+                        color: isDark ? Colors.white : Colors.black)),
                 Text(
-                  _connecting
-                      ? 'جاري الاتصال...'
-                      : _agentJoined
-                          ? 'متصل'
-                          : 'في الانتظار...',
+                  _connecting ? 'جاري الاتصال...' : _agentJoined ? 'متصل' : 'في الانتظار...',
                   style: GoogleFonts.cairo(
                       fontSize: 11,
-                      color: _agentJoined ? Colors.greenAccent : AppTheme.grey),
+                      color: _agentJoined ? Colors.greenAccent : Colors.grey),
                 ),
               ],
             ),
@@ -189,30 +184,26 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
       body: Column(
         children: [
-          // loading
           if (_connecting)
             Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(vertical: 14),
-              color: AppTheme.darkSurface,
+              color: isDark ? const Color(0xFF1C1C1C) : const Color(0xFFEEEEEE),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   const SizedBox(
-                    width: 16,
-                    height: 16,
+                    width: 16, height: 16,
                     child: CircularProgressIndicator(
                         color: AppTheme.red, strokeWidth: 2),
                   ),
                   const SizedBox(width: 10),
                   Text('جاري البحث عن موظف...',
-                      style: GoogleFonts.cairo(
-                          color: AppTheme.grey, fontSize: 13)),
+                      style: GoogleFonts.cairo(color: Colors.grey, fontSize: 13)),
                 ],
               ),
             ),
 
-          // رسائل
           Expanded(
             child: ListView.builder(
               controller: _scrollCtrl,
@@ -222,29 +213,31 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
           ),
 
-          // إدخال
           if (_agentJoined)
             Container(
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
-              color: AppTheme.darkCard,
+              color: cardBg,
               child: Row(
                 children: [
                   Expanded(
                     child: Container(
                       decoration: BoxDecoration(
-                        color: AppTheme.darkSurface,
+                        color: isDark ? const Color(0xFF1C1C1C) : const Color(0xFFF0F0F0),
                         borderRadius: BorderRadius.circular(24),
                         border: Border.all(
-                            color: Colors.white.withOpacity(0.08)),
+                            color: isDark
+                                ? Colors.white.withOpacity(0.08)
+                                : Colors.black.withOpacity(0.08)),
                       ),
                       child: TextField(
                         controller: _msgCtrl,
                         style: GoogleFonts.cairo(
-                            color: Colors.white, fontSize: 14),
+                            color: isDark ? Colors.white : Colors.black,
+                            fontSize: 14),
                         decoration: InputDecoration(
                           hintText: 'اكتب رسالتك...',
                           hintStyle: GoogleFonts.cairo(
-                              color: AppTheme.grey, fontSize: 14),
+                              color: Colors.grey, fontSize: 14),
                           border: InputBorder.none,
                           contentPadding: const EdgeInsets.symmetric(
                               horizontal: 16, vertical: 12),
@@ -257,8 +250,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   GestureDetector(
                     onTap: _sendMessage,
                     child: Container(
-                      width: 44,
-                      height: 44,
+                      width: 44, height: 44,
                       decoration: BoxDecoration(
                         color: AppTheme.red,
                         borderRadius: BorderRadius.circular(22),
@@ -288,41 +280,43 @@ class _MessageBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isUser = msg.isUser;
+    // المستخدم = أزرق، الموظف = أحمر
+    final bubbleColor = isUser
+        ? const Color(0xFF1565C0)
+        : AppTheme.red;
+
     return Align(
       alignment: isUser ? Alignment.centerLeft : Alignment.centerRight,
       child: Container(
         margin: const EdgeInsets.only(bottom: 10),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        constraints: BoxConstraints(
-            maxWidth: MediaQuery.of(context).size.width * 0.72),
+        constraints:
+            BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.72),
         decoration: BoxDecoration(
-          color: isUser ? AppTheme.darkSurface : AppTheme.red,
+          color: bubbleColor,
           borderRadius: BorderRadius.only(
             topLeft: const Radius.circular(16),
             topRight: const Radius.circular(16),
             bottomLeft: isUser ? Radius.zero : const Radius.circular(16),
             bottomRight: isUser ? const Radius.circular(16) : Radius.zero,
           ),
-          boxShadow: isUser
-              ? []
-              : [
-                  BoxShadow(
-                      color: AppTheme.red.withOpacity(0.2),
-                      blurRadius: 8)
-                ],
+          boxShadow: [
+            BoxShadow(
+                color: bubbleColor.withOpacity(0.3),
+                blurRadius: 8)
+          ],
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (!isUser)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 4),
-                child: Text('الموظف',
-                    style: GoogleFonts.cairo(
-                        fontSize: 11,
-                        color: Colors.white70,
-                        fontWeight: FontWeight.w600)),
-              ),
+            Text(
+              isUser ? 'أنت' : 'الموظف',
+              style: GoogleFonts.cairo(
+                  fontSize: 11,
+                  color: Colors.white70,
+                  fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 2),
             Text(msg.text,
                 style: GoogleFonts.cairo(
                     fontSize: 14, color: Colors.white, height: 1.4)),

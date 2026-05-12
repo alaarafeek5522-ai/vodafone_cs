@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -10,11 +11,19 @@ class SplashScreen extends StatefulWidget {
   State<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashScreenState extends State<SplashScreen> {
+class _SplashScreenState extends State<SplashScreen>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _rotCtrl;
+
   @override
   void initState() {
     super.initState();
-    Future.delayed(const Duration(milliseconds: 3200), () {
+    _rotCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 6),
+    )..repeat();
+
+    Future.delayed(const Duration(milliseconds: 3500), () {
       if (mounted) {
         Navigator.pushReplacement(
             context, MaterialPageRoute(builder: (_) => const LoginScreen()));
@@ -23,52 +32,79 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 
   @override
+  void dispose() {
+    _rotCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bg = isDark ? const Color(0xFF0A0A0A) : const Color(0xFFF5F5F5);
+    final textColor = isDark ? Colors.white : const Color(0xFF0A0A0A);
+
     return Scaffold(
-      backgroundColor: AppTheme.black,
+      backgroundColor: bg,
       body: Stack(
         children: [
-          // خلفية
-          Positioned.fill(
-            child: CustomPaint(painter: _GridPainter()),
-          ),
-          // محتوى المنتصف
+          Positioned.fill(child: CustomPaint(painter: _GridPainter(isDark: isDark))),
           Center(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // لوجو
-                Container(
-                  width: 100,
-                  height: 100,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: AppTheme.red,
-                    boxShadow: [
-                      BoxShadow(
-                        color: AppTheme.red.withOpacity(0.5),
-                        blurRadius: 40,
-                        spreadRadius: 10,
+                // الدائرة الدوارة مع Team Ali
+                SizedBox(
+                  width: 220,
+                  height: 220,
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      // دائرة خارجية دوارة
+                      AnimatedBuilder(
+                        animation: _rotCtrl,
+                        builder: (_, __) => Transform.rotate(
+                          angle: _rotCtrl.value * 2 * pi,
+                          child: CustomPaint(
+                            size: const Size(220, 220),
+                            painter: _CircleTextPainter(
+                              text: 'Team Ali  ✦  Team Ali  ✦  ',
+                            ),
+                          ),
+                        ),
                       ),
+                      // لوجو في المنتصف
+                      Container(
+                        width: 110,
+                        height: 110,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: AppTheme.red,
+                          boxShadow: [
+                            BoxShadow(
+                              color: AppTheme.red.withOpacity(0.5),
+                              blurRadius: 40,
+                              spreadRadius: 8,
+                            ),
+                          ],
+                        ),
+                        child: const Icon(Icons.headset_mic_rounded,
+                            color: Colors.white, size: 52),
+                      )
+                          .animate()
+                          .scale(duration: 600.ms, curve: Curves.elasticOut)
+                          .fadeIn(duration: 400.ms),
                     ],
                   ),
-                  child: const Icon(Icons.headset_mic_rounded,
-                      color: Colors.white, size: 50),
-                )
-                    .animate()
-                    .scale(duration: 600.ms, curve: Curves.elasticOut)
-                    .fadeIn(duration: 400.ms),
+                ),
 
-                const SizedBox(height: 28),
+                const SizedBox(height: 36),
 
-                // اسم التطبيق
                 Text(
                   'خدمة العملاء',
                   style: GoogleFonts.cairo(
                     fontSize: 32,
                     fontWeight: FontWeight.w800,
-                    color: AppTheme.white,
-                    letterSpacing: 1,
+                    color: textColor,
                   ),
                 )
                     .animate(delay: 300.ms)
@@ -77,58 +113,35 @@ class _SplashScreenState extends State<SplashScreen> {
 
                 const SizedBox(height: 6),
 
-                // Vodafone
                 Text(
                   'Vodafone Egypt',
                   style: GoogleFonts.cairo(
-                    fontSize: 16,
+                    fontSize: 15,
                     fontWeight: FontWeight.w400,
                     color: AppTheme.red,
                     letterSpacing: 3,
                   ),
-                )
-                    .animate(delay: 500.ms)
-                    .fadeIn(duration: 500.ms),
-
-                const SizedBox(height: 48),
-
-                // Team Ali
-                Text(
-                  'Team Ali',
-                  style: GoogleFonts.dancingScript(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w700,
-                    color: AppTheme.gold,
-                  ),
-                )
-                    .animate(delay: 700.ms)
-                    .fadeIn(duration: 600.ms)
-                    .shimmer(
-                      duration: 1200.ms,
-                      color: Colors.white,
-                      delay: 900.ms,
-                    ),
+                ).animate(delay: 500.ms).fadeIn(),
               ],
             ),
           ),
 
-          // loading في الأسفل
           Positioned(
             bottom: 50,
             left: 0,
             right: 0,
-            child: Column(
-              children: [
-                SizedBox(
-                  width: 140,
-                  child: LinearProgressIndicator(
-                    backgroundColor: AppTheme.darkSurface,
-                    valueColor:
-                        const AlwaysStoppedAnimation<Color>(AppTheme.red),
-                    minHeight: 2,
-                  ),
-                ).animate(delay: 400.ms).fadeIn(),
-              ],
+            child: Center(
+              child: SizedBox(
+                width: 140,
+                child: LinearProgressIndicator(
+                  backgroundColor: isDark
+                      ? const Color(0xFF1C1C1C)
+                      : const Color(0xFFE0E0E0),
+                  valueColor:
+                      const AlwaysStoppedAnimation<Color>(AppTheme.red),
+                  minHeight: 2,
+                ),
+              ).animate(delay: 400.ms).fadeIn(),
             ),
           ),
         ],
@@ -137,11 +150,54 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 }
 
+class _CircleTextPainter extends CustomPainter {
+  final String text;
+  _CircleTextPainter({required this.text});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = size.width / 2 - 10;
+
+    final textPainter = TextPainter(textDirection: TextDirection.ltr);
+    final charAngle = (2 * pi) / text.length;
+
+    for (int i = 0; i < text.length; i++) {
+      final angle = i * charAngle - pi / 2;
+      final x = center.dx + radius * cos(angle);
+      final y = center.dy + radius * sin(angle);
+
+      canvas.save();
+      canvas.translate(x, y);
+      canvas.rotate(angle + pi / 2);
+
+      textPainter.text = TextSpan(
+        text: text[i],
+        style: TextStyle(
+          fontSize: 13,
+          fontWeight: FontWeight.w700,
+          color: AppTheme.gold,
+          letterSpacing: 1,
+        ),
+      );
+      textPainter.layout();
+      textPainter.paint(
+          canvas, Offset(-textPainter.width / 2, -textPainter.height / 2));
+      canvas.restore();
+    }
+  }
+
+  @override
+  bool shouldRepaint(_) => false;
+}
+
 class _GridPainter extends CustomPainter {
+  final bool isDark;
+  _GridPainter({required this.isDark});
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = Colors.white.withOpacity(0.03)
+      ..color = (isDark ? Colors.white : Colors.black).withOpacity(0.03)
       ..strokeWidth = 1;
     const step = 40.0;
     for (double x = 0; x < size.width; x += step) {
