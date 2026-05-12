@@ -3,7 +3,7 @@ import 'dart:math';
 import 'package:http/http.dart' as http;
 
 class VodafoneService {
-  static const _timeout = Duration(seconds: 10);
+  static const _timeout = Duration(seconds: 15);
 
   static String _randomHex(int length) {
     final rand = Random();
@@ -19,6 +19,7 @@ class VodafoneService {
 
   static Map<String, String> _getDeviceHeaders({String? msisdn}) {
     final devices = [
+      'Realme RMX3760',
       'Xiaomi M2102J20SG',
       'Samsung SM-G998B',
       'LENOVO TB310XU',
@@ -29,7 +30,7 @@ class VodafoneService {
       'Accept': 'application/json, text/plain, */*',
       'Connection': 'keep-alive',
       'silentLogin': 'true',
-      'x-agent-operatingsystem': '${11 + rand.nextInt(4)}',
+      'x-agent-operatingsystem': '${11 + rand.nextInt(5)}',
       'clientId': 'AnaVodafoneAndroid',
       'Accept-Language': 'ar',
       'x-agent-device': devices[rand.nextInt(devices.length)],
@@ -54,12 +55,14 @@ class VodafoneService {
       'username': phone,
       'password': password,
       'grant_type': 'password',
-      'client_secret': '95fd95fb-7489-4958-8ae6-d31a525cd20a',
-      'client_id': 'ana-vodafone-app',
+      'client_secret': 'dca0pbLUWXVhXR266Gw1iT5rqwvvJQoN',
+      'client_id': 'AnaVF',
     };
     final response = await http.post(url, headers: headers, body: body)
         .timeout(_timeout);
-    if (response.statusCode != 200) throw Exception('فشل تسجيل الدخول');
+    if (response.statusCode != 200) {
+      throw Exception('فشل تسجيل الدخول: ${response.statusCode}');
+    }
     return jsonDecode(response.body)['access_token'];
   }
 
@@ -77,23 +80,75 @@ class VodafoneService {
   }
 
   static Future<Map<String, String>> getUserProfile(String token, String phone) async {
+    // أول حاجة نحاول نجيب البيانات من الـ API
+    try {
+      final url = Uri.parse(
+          'https://web.vodafone.com.eg/services/dxl/sam/serviceAccountManagement/v1/serviceAccount');
+      final params = {
+        '@type': 'DigitalProfile',
+        r"$.resources[?(@resourceType=='MSISDN')].IDs[0].value": phone,
+      };
+      final uri = url.replace(queryParameters: params);
+      final headers = {
+        'User-Agent': 'Mozilla/5.0 (Linux; Android 13; Xiaomi Build/SKQ1.210216.001) AppleWebKit/537.36',
+        'Accept': 'application/json',
+        'Authorization': 'Bearer $token',
+        'Accept-Language': 'AR',
+        'msisdn': phone,
+        'clientId': 'WebsiteConsumer',
+        'Content-Type': 'application/json',
+        'Referer': 'https://web.vodafone.com.eg/spa/profile',
+      };
+      final response = await http.get(uri, headers: headers).timeout(_timeout);
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data is List && data.isNotEmpty && data[0]['contact'] != null) {
+          final contact = data[0]['contact'][0];
+          final tariff = _getTariffFromToken(token);
+          return {
+            'firstName': contact['contactFirstName'] ?? 'Unknown',
+            'lastName': contact['contactLastName'] ?? 'Unknown',
+            'tariff': tariff,
+          };
+        }
+      }
+    } catch (_) {}
+
+    // fallback من الـ token
     final decoded = decodeToken(token);
     final userInfo = decoded['userInfo'] ?? {};
     return {
       'firstName': userInfo['firstName'] ?? 'Unknown',
       'lastName': userInfo['lastName'] ?? 'Unknown',
-      'tariff': userInfo['tariffModelName'] ?? 'غير محدد',
+      'tariff': _getTariffFromToken(token),
     };
+  }
+
+  static String _getTariffFromToken(String token) {
+    try {
+      final decoded = decodeToken(token);
+      final userInfo = decoded['userInfo'] ?? {};
+      return userInfo['tariffModelName'] ?? 'غير محدد';
+    } catch (_) {
+      return 'غير محدد';
+    }
   }
 
   static Map<String, String> get _chatHeaders => {
     'User-Agent': 'Mozilla/5.0 (Linux; Android 13; Xiaomi Build/SKQ1.210216.001) AppleWebKit/537.36',
     'Accept': 'application/json, text/plain, */*',
+    'Accept-Encoding': 'gzip, deflate, br, zstd',
     'Content-Type': 'application/json',
+    'sec-ch-ua-platform': '"Android"',
+    'sec-ch-ua': '"Chromium";v="146", "Not-A.Brand";v="24", "Android WebView";v="146"',
+    'sec-ch-ua-mobile': '?1',
     'Origin': 'https://web.vodafone.com.eg',
-    'Referer': 'https://web.vodafone.com.eg/',
-    'Accept-Language': 'ar,ar-EG;q=0.9',
     'X-Requested-With': 'com.emeint.android.myservices',
+    'Sec-Fetch-Site': 'same-site',
+    'Sec-Fetch-Mode': 'cors',
+    'Sec-Fetch-Dest': 'empty',
+    'Referer': 'https://web.vodafone.com.eg/',
+    'Accept-Language': 'ar,ar-EG;q=0.9,en-US;q=0.8,en;q=0.7',
   };
 
   static Future<String> createChatSession() async {
@@ -137,8 +192,9 @@ class VodafoneService {
   static Future<Map<String, dynamic>> refreshChat(String chatId, int position) async {
     final url = Uri.parse(
         'https://chat.vodafone.com.eg/genesys/1/service/$chatId/ixn/chat/refresh?transcriptPosition=$position');
-    final response = await http.post(url, headers: _chatHeaders, body: jsonEncode({}))
-        .timeout(const Duration(seconds: 8));
+    final response = await http
+        .post(url, headers: _chatHeaders, body: jsonEncode({}))
+        .timeout(const Duration(seconds: 10));
     return jsonDecode(response.body);
   }
 
