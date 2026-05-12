@@ -3,6 +3,8 @@ import 'dart:math';
 import 'package:http/http.dart' as http;
 
 class VodafoneService {
+  static const _timeout = Duration(seconds: 10);
+
   static String _randomHex(int length) {
     final rand = Random();
     const chars = '0123456789abcdef';
@@ -55,12 +57,10 @@ class VodafoneService {
       'client_secret': '95fd95fb-7489-4958-8ae6-d31a525cd20a',
       'client_id': 'ana-vodafone-app',
     };
-    final response = await http.post(url, headers: headers, body: body);
-    if (response.statusCode != 200) {
-      throw Exception('فشل تسجيل الدخول');
-    }
-    final data = jsonDecode(response.body);
-    return data['access_token'];
+    final response = await http.post(url, headers: headers, body: body)
+        .timeout(_timeout);
+    if (response.statusCode != 200) throw Exception('فشل تسجيل الدخول');
+    return jsonDecode(response.body)['access_token'];
   }
 
   static Map<String, dynamic> decodeToken(String token) {
@@ -79,34 +79,27 @@ class VodafoneService {
   static Future<Map<String, String>> getUserProfile(String token, String phone) async {
     final decoded = decodeToken(token);
     final userInfo = decoded['userInfo'] ?? {};
-    final firstName = userInfo['firstName'] ?? 'Unknown';
-    final lastName = userInfo['lastName'] ?? 'Unknown';
-    final tariff = userInfo['tariffModelName'] ?? 'غير محدد';
     return {
-      'firstName': firstName,
-      'lastName': lastName,
-      'tariff': tariff,
+      'firstName': userInfo['firstName'] ?? 'Unknown',
+      'lastName': userInfo['lastName'] ?? 'Unknown',
+      'tariff': userInfo['tariffModelName'] ?? 'غير محدد',
     };
   }
 
-  static Map<String, String> get chatHeaders => {
-        'User-Agent': 'Mozilla/5.0 (Linux; Android 13; Xiaomi Build/SKQ1.210216.001) AppleWebKit/537.36',
-        'Accept': 'application/json, text/plain, */*',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Content-Type': 'application/json',
-        'sec-ch-ua-platform': '"Android"',
-        'sec-ch-ua': '"Chromium";v="146"',
-        'sec-ch-ua-mobile': '?1',
-        'Origin': 'https://web.vodafone.com.eg',
-        'Referer': 'https://web.vodafone.com.eg/',
-        'Accept-Language': 'ar,ar-EG;q=0.9',
-      };
+  static Map<String, String> get _chatHeaders => {
+    'User-Agent': 'Mozilla/5.0 (Linux; Android 13; Xiaomi Build/SKQ1.210216.001) AppleWebKit/537.36',
+    'Accept': 'application/json, text/plain, */*',
+    'Content-Type': 'application/json',
+    'Origin': 'https://web.vodafone.com.eg',
+    'Referer': 'https://web.vodafone.com.eg/',
+    'Accept-Language': 'ar,ar-EG;q=0.9',
+    'X-Requested-With': 'com.emeint.android.myservices',
+  };
 
   static Future<String> createChatSession() async {
     final url = Uri.parse('https://chat.vodafone.com.eg/genesys/1/service/Chat2');
-    final response = await http.get(url, headers: chatHeaders);
-    final data = jsonDecode(response.body);
-    return data['_id'];
+    final response = await http.get(url, headers: _chatHeaders).timeout(_timeout);
+    return jsonDecode(response.body)['_id'];
   }
 
   static Future<void> joinChat({
@@ -137,29 +130,29 @@ class VodafoneService {
       'Transfer_test': 'No',
       'Source': 'FlexBot',
     };
-    await http.post(url, headers: chatHeaders, body: jsonEncode(payload));
+    await http.post(url, headers: _chatHeaders, body: jsonEncode(payload))
+        .timeout(_timeout);
   }
 
-  static Future<Map<String, dynamic>> refreshChat(
-      String chatId, int position) async {
+  static Future<Map<String, dynamic>> refreshChat(String chatId, int position) async {
     final url = Uri.parse(
         'https://chat.vodafone.com.eg/genesys/1/service/$chatId/ixn/chat/refresh?transcriptPosition=$position');
-    final response =
-        await http.post(url, headers: chatHeaders, body: jsonEncode({}));
+    final response = await http.post(url, headers: _chatHeaders, body: jsonEncode({}))
+        .timeout(const Duration(seconds: 8));
     return jsonDecode(response.body);
   }
 
   static Future<void> sendMessage(String chatId, String message) async {
     final url = Uri.parse(
         'https://chat.vodafone.com.eg/genesys/1/service/$chatId/ixn/chat/send');
-    await http.post(url,
-        headers: chatHeaders, body: jsonEncode({'message': message}));
+    await http.post(url, headers: _chatHeaders, body: jsonEncode({'message': message}))
+        .timeout(_timeout);
   }
 
   static Future<void> disconnect(String chatId) async {
     final url = Uri.parse(
         'https://chat.vodafone.com.eg/genesys/1/service/$chatId/ixn/chat/disconnect');
-    await http.post(url,
-        headers: chatHeaders, body: jsonEncode({'_verbose': 'True'}));
+    await http.post(url, headers: _chatHeaders, body: jsonEncode({'_verbose': 'True'}))
+        .timeout(_timeout);
   }
 }

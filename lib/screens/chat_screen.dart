@@ -7,8 +7,7 @@ import '../services/vodafone_service.dart';
 class ChatMessage {
   final String text;
   final bool isUser;
-  final DateTime time;
-  ChatMessage({required this.text, required this.isUser, required this.time});
+  ChatMessage({required this.text, required this.isUser});
 }
 
 class ChatScreen extends StatefulWidget {
@@ -35,6 +34,7 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _ended = false;
   int _lastPosition = 0;
   Timer? _pollTimer;
+  bool _polling = false;
 
   @override
   void initState() {
@@ -52,40 +52,56 @@ class _ChatScreenState extends State<ChatScreen> {
         phone: widget.phone,
         tariff: widget.tariff,
       );
-      _pollTimer = Timer.periodic(const Duration(seconds: 2), (_) => _poll());
+      // polling كل 1.5 ثانية زي البوت الأصلي
+      _pollTimer = Timer.periodic(const Duration(milliseconds: 1500), (_) => _poll());
     } catch (e) {
       if (mounted) setState(() => _connecting = false);
     }
   }
 
   Future<void> _poll() async {
-    if (_chatId == null || _ended) return;
+    if (_chatId == null || _ended || _polling) return;
+    _polling = true;
     try {
       final data = await VodafoneService.refreshChat(_chatId!, _lastPosition);
+      if (!mounted) return;
+
       if (data['transcriptPosition'] != null) {
         _lastPosition = data['transcriptPosition'];
       }
+
       final transcript = data['transcriptToShow'];
       if (transcript != null) {
+        bool changed = false;
         for (final msg in transcript) {
-          if (msg is List && msg.isNotEmpty) {
-            if (msg[0] == 'Notice.Joined' && !_agentJoined) {
-              if (mounted) setState(() { _agentJoined = true; _connecting = false; });
-            }
-            if (msg.length >= 5 && msg[0] == 'Message.Text' && msg[4] == 'AGENT') {
-              if (mounted) setState(() {
-                _messages.add(ChatMessage(
-                  text: msg[2].toString(),
-                  isUser: false,
-                  time: DateTime.now(),
-                ));
-              });
-              _scrollDown();
-            }
+          if (msg is! List || msg.isEmpty) continue;
+
+          if (msg[0] == 'Notice.Joined' && !_agentJoined) {
+            _agentJoined = true;
+            _connecting = false;
+            changed = true;
+          }
+
+          if (msg.length >= 5 &&
+              msg[0] == 'Message.Text' &&
+              msg[4] == 'AGENT') {
+            _messages.add(ChatMessage(
+              text: msg[2].toString(),
+              isUser: false,
+            ));
+            changed = true;
           }
         }
+        if (changed && mounted) {
+          setState(() {});
+          _scrollDown();
+        }
       }
-    } catch (_) {}
+    } catch (_) {
+      // ignore timeout/network errors — بيحاول تاني
+    } finally {
+      _polling = false;
+    }
   }
 
   Future<void> _sendMessage() async {
@@ -93,15 +109,19 @@ class _ChatScreenState extends State<ChatScreen> {
     if (text.isEmpty || _chatId == null || !_agentJoined) return;
     _msgCtrl.clear();
     setState(() {
-      _messages.add(ChatMessage(text: text, isUser: true, time: DateTime.now()));
+      _messages.add(ChatMessage(text: text, isUser: true));
     });
     _scrollDown();
-    await VodafoneService.sendMessage(_chatId!, text);
+    try {
+      await VodafoneService.sendMessage(_chatId!, text);
+    } catch (_) {}
   }
 
   Future<void> _endChat() async {
     _pollTimer?.cancel();
-    if (_chatId != null) await VodafoneService.disconnect(_chatId!);
+    try {
+      if (_chatId != null) await VodafoneService.disconnect(_chatId!);
+    } catch (_) {}
     setState(() => _ended = true);
     if (mounted) Navigator.pop(context);
   }
@@ -109,9 +129,11 @@ class _ChatScreenState extends State<ChatScreen> {
   void _scrollDown() {
     Future.delayed(const Duration(milliseconds: 100), () {
       if (_scrollCtrl.hasClients) {
-        _scrollCtrl.animateTo(_scrollCtrl.position.maxScrollExtent,
-            duration: const Duration(milliseconds: 300),
-            curve: Curves.easeOut);
+        _scrollCtrl.animateTo(
+          _scrollCtrl.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
       }
     });
   }
@@ -127,17 +149,21 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final bg = isDark ? const Color(0xFF0A0A0A) : const Color(0xFFF5F5F5);
-    final cardBg = isDark ? const Color(0xFF141414) : Colors.white;
+    // خلفية بيضاء في الـ light، داكنة في الـ dark
+    final bg = isDark ? const Color(0xFF0A0A0A) : Colors.white;
+    final appBarBg = isDark ? const Color(0xFF141414) : Colors.white;
+    final inputBg = isDark ? const Color(0xFF1C1C1C) : const Color(0xFFF5F5F5);
+    final textColor = isDark ? Colors.white : const Color(0xFF0A0A0A);
 
     return Scaffold(
       backgroundColor: bg,
       appBar: AppBar(
-        backgroundColor: cardBg,
-        elevation: 0,
+        backgroundColor: appBarBg,
+        elevation: 0.5,
+        shadowColor: Colors.grey.withOpacity(0.2),
         leading: IconButton(
           icon: Icon(Icons.arrow_back_ios_rounded,
-              color: isDark ? Colors.white : Colors.black, size: 20),
+              color: textColor, size: 20),
           onPressed: () => Navigator.pop(context),
         ),
         title: Row(
@@ -159,12 +185,32 @@ class _ChatScreenState extends State<ChatScreen> {
                     style: GoogleFonts.cairo(
                         fontSize: 15,
                         fontWeight: FontWeight.w700,
-                        color: isDark ? Colors.white : Colors.black)),
-                Text(
-                  _connecting ? 'جاري الاتصال...' : _agentJoined ? 'متصل' : 'في الانتظار...',
-                  style: GoogleFonts.cairo(
-                      fontSize: 11,
-                      color: _agentJoined ? Colors.greenAccent : Colors.grey),
+                        color: textColor)),
+                Row(
+                  children: [
+                    Container(
+                      width: 7, height: 7,
+                      margin: const EdgeInsets.only(left: 4),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: _connecting
+                            ? Colors.orange
+                            : _agentJoined
+                                ? Colors.green
+                                : Colors.orange,
+                      ),
+                    ),
+                    Text(
+                      _connecting
+                          ? 'جاري الاتصال...'
+                          : _agentJoined
+                              ? 'متصل'
+                              : 'في الانتظار...',
+                      style: GoogleFonts.cairo(
+                          fontSize: 11,
+                          color: _agentJoined ? Colors.green : Colors.orange),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -172,68 +218,96 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
         actions: [
           if (_agentJoined)
-            TextButton(
-              onPressed: _endChat,
-              child: Text('إنهاء',
-                  style: GoogleFonts.cairo(
-                      color: AppTheme.red,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 14)),
+            Padding(
+              padding: const EdgeInsets.only(left: 8),
+              child: TextButton(
+                onPressed: _endChat,
+                child: Text('إنهاء',
+                    style: GoogleFonts.cairo(
+                        color: AppTheme.red,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14)),
+              ),
             ),
         ],
       ),
       body: Column(
         children: [
+          // شريط الانتظار
           if (_connecting)
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              color: isDark ? const Color(0xFF1C1C1C) : const Color(0xFFEEEEEE),
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              color: isDark
+                  ? const Color(0xFF1A1A1A)
+                  : const Color(0xFFFFF3F3),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   const SizedBox(
-                    width: 16, height: 16,
+                    width: 14, height: 14,
                     child: CircularProgressIndicator(
                         color: AppTheme.red, strokeWidth: 2),
                   ),
                   const SizedBox(width: 10),
                   Text('جاري البحث عن موظف...',
-                      style: GoogleFonts.cairo(color: Colors.grey, fontSize: 13)),
+                      style: GoogleFonts.cairo(
+                          color: AppTheme.red, fontSize: 13,
+                          fontWeight: FontWeight.w600)),
                 ],
               ),
             ),
 
+          // الرسائل
           Expanded(
-            child: ListView.builder(
-              controller: _scrollCtrl,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              itemCount: _messages.length,
-              itemBuilder: (_, i) => _MessageBubble(msg: _messages[i]),
-            ),
+            child: _messages.isEmpty && !_connecting
+                ? Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.chat_bubble_outline_rounded,
+                            color: Colors.grey.withOpacity(0.4), size: 48),
+                        const SizedBox(height: 12),
+                        Text('ابدأ المحادثة',
+                            style: GoogleFonts.cairo(
+                                color: Colors.grey, fontSize: 15)),
+                      ],
+                    ),
+                  )
+                : ListView.builder(
+                    controller: _scrollCtrl,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 12),
+                    itemCount: _messages.length,
+                    itemBuilder: (_, i) =>
+                        _MessageBubble(msg: _messages[i]),
+                  ),
           ),
 
+          // حقل الإرسال
           if (_agentJoined)
             Container(
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
-              color: cardBg,
+              decoration: BoxDecoration(
+                color: appBarBg,
+                border: Border(
+                    top: BorderSide(
+                        color: Colors.grey.withOpacity(0.15))),
+              ),
               child: Row(
                 children: [
                   Expanded(
                     child: Container(
                       decoration: BoxDecoration(
-                        color: isDark ? const Color(0xFF1C1C1C) : const Color(0xFFF0F0F0),
+                        color: inputBg,
                         borderRadius: BorderRadius.circular(24),
                         border: Border.all(
-                            color: isDark
-                                ? Colors.white.withOpacity(0.08)
-                                : Colors.black.withOpacity(0.08)),
+                            color: Colors.grey.withOpacity(0.15)),
                       ),
                       child: TextField(
                         controller: _msgCtrl,
                         style: GoogleFonts.cairo(
-                            color: isDark ? Colors.white : Colors.black,
-                            fontSize: 14),
+                            color: textColor, fontSize: 14),
                         decoration: InputDecoration(
                           hintText: 'اكتب رسالتك...',
                           hintStyle: GoogleFonts.cairo(
@@ -256,8 +330,8 @@ class _ChatScreenState extends State<ChatScreen> {
                         borderRadius: BorderRadius.circular(22),
                         boxShadow: [
                           BoxShadow(
-                              color: AppTheme.red.withOpacity(0.4),
-                              blurRadius: 12),
+                              color: AppTheme.red.withOpacity(0.35),
+                              blurRadius: 10),
                         ],
                       ),
                       child: const Icon(Icons.send_rounded,
@@ -280,30 +354,30 @@ class _MessageBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isUser = msg.isUser;
-    // المستخدم = أزرق، الموظف = أحمر
-    final bubbleColor = isUser
-        ? const Color(0xFF1565C0)
-        : AppTheme.red;
+    // المستخدم = أزرق غامق، الموظف = أحمر فودافون
+    final bubbleColor =
+        isUser ? const Color(0xFF1565C0) : AppTheme.red;
 
     return Align(
       alignment: isUser ? Alignment.centerLeft : Alignment.centerRight,
       child: Container(
-        margin: const EdgeInsets.only(bottom: 10),
+        margin: const EdgeInsets.only(bottom: 8),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        constraints:
-            BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.72),
+        constraints: BoxConstraints(
+            maxWidth: MediaQuery.of(context).size.width * 0.75),
         decoration: BoxDecoration(
           color: bubbleColor,
           borderRadius: BorderRadius.only(
             topLeft: const Radius.circular(16),
             topRight: const Radius.circular(16),
-            bottomLeft: isUser ? Radius.zero : const Radius.circular(16),
-            bottomRight: isUser ? const Radius.circular(16) : Radius.zero,
+            bottomLeft:
+                isUser ? Radius.zero : const Radius.circular(16),
+            bottomRight:
+                isUser ? const Radius.circular(16) : Radius.zero,
           ),
           boxShadow: [
             BoxShadow(
-                color: bubbleColor.withOpacity(0.3),
-                blurRadius: 8)
+                color: bubbleColor.withOpacity(0.25), blurRadius: 8)
           ],
         ),
         child: Column(
@@ -312,14 +386,16 @@ class _MessageBubble extends StatelessWidget {
             Text(
               isUser ? 'أنت' : 'الموظف',
               style: GoogleFonts.cairo(
-                  fontSize: 11,
+                  fontSize: 10,
                   color: Colors.white70,
                   fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 2),
             Text(msg.text,
                 style: GoogleFonts.cairo(
-                    fontSize: 14, color: Colors.white, height: 1.4)),
+                    fontSize: 14,
+                    color: Colors.white,
+                    height: 1.4)),
           ],
         ),
       ),
