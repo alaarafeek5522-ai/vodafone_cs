@@ -3,8 +3,6 @@ import 'dart:math';
 import 'package:http/http.dart' as http;
 
 class VodafoneService {
-  static const _timeout = Duration(seconds: 15);
-
   static String _randomHex(int length) {
     final rand = Random();
     const chars = '0123456789abcdef';
@@ -18,15 +16,9 @@ class VodafoneService {
   }
 
   static Map<String, String> _getDeviceHeaders({String? msisdn}) {
-    final devices = [
-      'Realme RMX3760',
-      'Xiaomi M2102J20SG',
-      'Samsung SM-G998B',
-      'LENOVO TB310XU',
-      'HUAWEI LIO-L29',
-    ];
+    final devices = ['Realme RMX3760','Xiaomi M2102J20SG','Samsung SM-G998B','LENOVO TB310XU','HUAWEI LIO-L29'];
     final rand = Random();
-    final headers = <String, String>{
+    final h = <String, String>{
       'Accept': 'application/json, text/plain, */*',
       'Connection': 'keep-alive',
       'silentLogin': 'true',
@@ -43,26 +35,22 @@ class VodafoneService {
       'Accept-Encoding': 'gzip',
       'User-Agent': 'okhttp/4.12.0',
     };
-    if (msisdn != null) headers['msisdn'] = msisdn;
-    return headers;
+    if (msisdn != null) h['msisdn'] = msisdn;
+    return h;
   }
 
   static Future<String> login(String phone, String password) async {
-    final url = Uri.parse(
-        'https://mobile.vodafone.com.eg/auth/realms/vf-realm/protocol/openid-connect/token');
-    final headers = _getDeviceHeaders(msisdn: phone);
-    final body = {
-      'username': phone,
-      'password': password,
-      'grant_type': 'password',
-      'client_secret': 'dca0pbLUWXVhXR266Gw1iT5rqwvvJQoN',
-      'client_id': 'AnaVF',
-    };
-    final response = await http.post(url, headers: headers, body: body)
-        .timeout(_timeout);
-    if (response.statusCode != 200) {
-      throw Exception('فشل تسجيل الدخول: ${response.statusCode}');
-    }
+    final url = Uri.parse('https://mobile.vodafone.com.eg/auth/realms/vf-realm/protocol/openid-connect/token');
+    final response = await http.post(url,
+        headers: _getDeviceHeaders(msisdn: phone),
+        body: {
+          'username': phone,
+          'password': password,
+          'grant_type': 'password',
+          'client_secret': 'dca0pbLUWXVhXR266Gw1iT5rqwvvJQoN',
+          'client_id': 'AnaVF',
+        }).timeout(const Duration(seconds: 15));
+    if (response.statusCode != 200) throw Exception('فشل تسجيل الدخول');
     return jsonDecode(response.body)['access_token'];
   }
 
@@ -70,27 +58,21 @@ class VodafoneService {
     try {
       final parts = token.split('.');
       if (parts.length < 2) return {};
-      String payload = parts[1];
-      payload += '=' * ((4 - payload.length % 4) % 4);
-      final decoded = utf8.decode(base64Url.decode(payload));
-      return jsonDecode(decoded);
-    } catch (_) {
-      return {};
-    }
+      String p = parts[1];
+      p += '=' * ((4 - p.length % 4) % 4);
+      return jsonDecode(utf8.decode(base64Url.decode(p)));
+    } catch (_) { return {}; }
   }
 
   static Future<Map<String, String>> getUserProfile(String token, String phone) async {
-    // أول حاجة نحاول نجيب البيانات من الـ API
     try {
-      final url = Uri.parse(
-          'https://web.vodafone.com.eg/services/dxl/sam/serviceAccountManagement/v1/serviceAccount');
-      final params = {
+      final uri = Uri.parse('https://web.vodafone.com.eg/services/dxl/sam/serviceAccountManagement/v1/serviceAccount')
+          .replace(queryParameters: {
         '@type': 'DigitalProfile',
         r"$.resources[?(@resourceType=='MSISDN')].IDs[0].value": phone,
-      };
-      final uri = url.replace(queryParameters: params);
-      final headers = {
-        'User-Agent': 'Mozilla/5.0 (Linux; Android 13; Xiaomi Build/SKQ1.210216.001) AppleWebKit/537.36',
+      });
+      final r = await http.get(uri, headers: {
+        'User-Agent': 'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36',
         'Accept': 'application/json',
         'Authorization': 'Bearer $token',
         'Accept-Language': 'AR',
@@ -98,47 +80,37 @@ class VodafoneService {
         'clientId': 'WebsiteConsumer',
         'Content-Type': 'application/json',
         'Referer': 'https://web.vodafone.com.eg/spa/profile',
-      };
-      final response = await http.get(uri, headers: headers).timeout(_timeout);
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
+      }).timeout(const Duration(seconds: 15));
+      if (r.statusCode == 200) {
+        final data = jsonDecode(r.body);
         if (data is List && data.isNotEmpty && data[0]['contact'] != null) {
-          final contact = data[0]['contact'][0];
-          final tariff = _getTariffFromToken(token);
+          final c = data[0]['contact'][0];
           return {
-            'firstName': contact['contactFirstName'] ?? 'Unknown',
-            'lastName': contact['contactLastName'] ?? 'Unknown',
-            'tariff': tariff,
+            'firstName': c['contactFirstName'] ?? 'Unknown',
+            'lastName': c['contactLastName'] ?? 'Unknown',
+            'tariff': _tariff(token),
           };
         }
       }
     } catch (_) {}
-
-    // fallback من الـ token
-    final decoded = decodeToken(token);
-    final userInfo = decoded['userInfo'] ?? {};
+    final info = decodeToken(token)['userInfo'] ?? {};
     return {
-      'firstName': userInfo['firstName'] ?? 'Unknown',
-      'lastName': userInfo['lastName'] ?? 'Unknown',
-      'tariff': _getTariffFromToken(token),
+      'firstName': info['firstName'] ?? 'Unknown',
+      'lastName': info['lastName'] ?? 'Unknown',
+      'tariff': _tariff(token),
     };
   }
 
-  static String _getTariffFromToken(String token) {
-    try {
-      final decoded = decodeToken(token);
-      final userInfo = decoded['userInfo'] ?? {};
-      return userInfo['tariffModelName'] ?? 'غير محدد';
-    } catch (_) {
-      return 'غير محدد';
-    }
+  static String _tariff(String token) {
+    try { return decodeToken(token)['userInfo']?['tariffModelName'] ?? 'غير محدد'; }
+    catch (_) { return 'غير محدد'; }
   }
 
-  static Map<String, String> get _chatHeaders => {
+  // نفس الهيدرز بالظبط زي البوت
+  static final Map<String, String> _chatHeaders = {
     'User-Agent': 'Mozilla/5.0 (Linux; Android 13; Xiaomi Build/SKQ1.210216.001) AppleWebKit/537.36',
     'Accept': 'application/json, text/plain, */*',
     'Accept-Encoding': 'gzip, deflate, br, zstd',
-    'Content-Type': 'application/json',
     'sec-ch-ua-platform': '"Android"',
     'sec-ch-ua': '"Chromium";v="146", "Not-A.Brand";v="24", "Android WebView";v="146"',
     'sec-ch-ua-mobile': '?1',
@@ -152,9 +124,11 @@ class VodafoneService {
   };
 
   static Future<String> createChatSession() async {
-    final url = Uri.parse('https://chat.vodafone.com.eg/genesys/1/service/Chat2');
-    final response = await http.get(url, headers: _chatHeaders).timeout(_timeout);
-    return jsonDecode(response.body)['_id'];
+    final r = await http.get(
+      Uri.parse('https://chat.vodafone.com.eg/genesys/1/service/Chat2'),
+      headers: _chatHeaders,
+    ).timeout(const Duration(seconds: 15));
+    return jsonDecode(r.body)['_id'];
   }
 
   static Future<void> joinChat({
@@ -164,51 +138,64 @@ class VodafoneService {
     required String phone,
     required String tariff,
   }) async {
-    final url = Uri.parse(
-        'https://chat.vodafone.com.eg/genesys/1/service/$chatId/ixn/chat');
-    final payload = {
-      'subject': 'ES_1_mobile_es',
-      'FirstName': firstName,
-      'LastName': lastName,
-      'EmailAddress': '',
-      'UserName': '',
-      'LoggedIn': 'True',
-      'transcriptEmailAddress': 'True',
-      'message': 'hi-test-dev team',
-      'TopicSelected': 'Chat_Contactus_ar',
-      'MSISDN': phone,
-      '_verbose': 'True',
-      'Language': 'ar',
-      'CustomerValue': '',
-      'RatePlan': tariff,
-      'Channel_name': 'app',
-      'Transfer_test': 'No',
-      'Source': 'FlexBot',
-    };
-    await http.post(url, headers: _chatHeaders, body: jsonEncode(payload))
-        .timeout(_timeout);
+    final h = Map<String, String>.from(_chatHeaders);
+    h['Content-Type'] = 'application/json';
+    await http.post(
+      Uri.parse('https://chat.vodafone.com.eg/genesys/1/service/$chatId/ixn/chat'),
+      headers: h,
+      body: jsonEncode({
+        'subject': 'ES_1_mobile_es',
+        'FirstName': firstName,
+        'LastName': lastName,
+        'EmailAddress': '',
+        'UserName': '',
+        'LoggedIn': 'True',
+        'transcriptEmailAddress': 'True',
+        'message': 'hi-test-dev team',
+        'TopicSelected': 'Chat_Contactus_ar',
+        'MSISDN': phone,
+        '_verbose': 'True',
+        'Language': 'ar',
+        'CustomerValue': '',
+        'RatePlan': tariff,
+        'Channel_name': 'app',
+        'Transfer_test': 'No',
+        'Source': 'FlexBot',
+      }),
+    ).timeout(const Duration(seconds: 15));
   }
 
+  // نفس طريقة البوت بالظبط — params كـ query string + body منفصل
   static Future<Map<String, dynamic>> refreshChat(String chatId, int position) async {
-    final url = Uri.parse(
-        'https://chat.vodafone.com.eg/genesys/1/service/$chatId/ixn/chat/refresh?transcriptPosition=$position');
-    final response = await http
-        .post(url, headers: _chatHeaders, body: jsonEncode({}))
-        .timeout(const Duration(seconds: 10));
-    return jsonDecode(response.body);
+    final h = Map<String, String>.from(_chatHeaders);
+    h['Content-Type'] = 'application/json';
+    final uri = Uri.parse(
+      'https://chat.vodafone.com.eg/genesys/1/service/$chatId/ixn/chat/refresh',
+    ).replace(queryParameters: {'transcriptPosition': position.toString()});
+    final r = await http.post(uri, headers: h, body: jsonEncode({}))
+        .timeout(const Duration(seconds: 30));
+    return jsonDecode(r.body);
   }
 
   static Future<void> sendMessage(String chatId, String message) async {
-    final url = Uri.parse(
-        'https://chat.vodafone.com.eg/genesys/1/service/$chatId/ixn/chat/send');
-    await http.post(url, headers: _chatHeaders, body: jsonEncode({'message': message}))
-        .timeout(_timeout);
+    final h = Map<String, String>.from(_chatHeaders);
+    h['Content-Type'] = 'application/json';
+    await http.post(
+      Uri.parse('https://chat.vodafone.com.eg/genesys/1/service/$chatId/ixn/chat/send'),
+      headers: h,
+      body: jsonEncode({'message': message}),
+    ).timeout(const Duration(seconds: 15));
   }
 
   static Future<void> disconnect(String chatId) async {
-    final url = Uri.parse(
-        'https://chat.vodafone.com.eg/genesys/1/service/$chatId/ixn/chat/disconnect');
-    await http.post(url, headers: _chatHeaders, body: jsonEncode({'_verbose': 'True'}))
-        .timeout(_timeout);
+    try {
+      final h = Map<String, String>.from(_chatHeaders);
+      h['Content-Type'] = 'application/json';
+      await http.post(
+        Uri.parse('https://chat.vodafone.com.eg/genesys/1/service/$chatId/ixn/chat/disconnect'),
+        headers: h,
+        body: jsonEncode({'_verbose': 'True'}),
+      ).timeout(const Duration(seconds: 10));
+    } catch (_) {}
   }
 }
