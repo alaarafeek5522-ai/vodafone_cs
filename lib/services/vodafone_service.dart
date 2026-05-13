@@ -1,8 +1,17 @@
 import 'dart:convert';
 import 'dart:math';
+import 'dart:io';
 import 'package:http/http.dart' as http;
+import 'package:http/io_client.dart';
 
 class VodafoneService {
+  static http.Client _client() {
+    final ctx = SecurityContext.defaultContext;
+    final hc = HttpClient(context: ctx)
+      ..badCertificateCallback = (cert, host, port) => true;
+    return IOClient(hc);
+  }
+
   static String _randomHex(int length) {
     final rand = Random();
     const chars = '0123456789abcdef';
@@ -40,8 +49,10 @@ class VodafoneService {
   }
 
   static Future<String> login(String phone, String password) async {
-    final url = Uri.parse('https://mobile.vodafone.com.eg/auth/realms/vf-realm/protocol/openid-connect/token');
-    final response = await http.post(url,
+    final client = _client();
+    try {
+      final r = await client.post(
+        Uri.parse('https://mobile.vodafone.com.eg/auth/realms/vf-realm/protocol/openid-connect/token'),
         headers: _getDeviceHeaders(msisdn: phone),
         body: {
           'username': phone,
@@ -49,9 +60,13 @@ class VodafoneService {
           'grant_type': 'password',
           'client_secret': 'dca0pbLUWXVhXR266Gw1iT5rqwvvJQoN',
           'client_id': 'AnaVF',
-        }).timeout(const Duration(seconds: 15));
-    if (response.statusCode != 200) throw Exception('فشل تسجيل الدخول');
-    return jsonDecode(response.body)['access_token'];
+        },
+      ).timeout(const Duration(seconds: 15));
+      if (r.statusCode != 200) throw Exception('فشل تسجيل الدخول');
+      return jsonDecode(r.body)['access_token'];
+    } finally {
+      client.close();
+    }
   }
 
   static Map<String, dynamic> decodeToken(String token) {
@@ -65,13 +80,15 @@ class VodafoneService {
   }
 
   static Future<Map<String, String>> getUserProfile(String token, String phone) async {
+    final client = _client();
     try {
-      final uri = Uri.parse('https://web.vodafone.com.eg/services/dxl/sam/serviceAccountManagement/v1/serviceAccount')
-          .replace(queryParameters: {
+      final uri = Uri.parse(
+        'https://web.vodafone.com.eg/services/dxl/sam/serviceAccountManagement/v1/serviceAccount',
+      ).replace(queryParameters: {
         '@type': 'DigitalProfile',
         r"$.resources[?(@resourceType=='MSISDN')].IDs[0].value": phone,
       });
-      final r = await http.get(uri, headers: {
+      final r = await client.get(uri, headers: {
         'User-Agent': 'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36',
         'Accept': 'application/json',
         'Authorization': 'Bearer $token',
@@ -92,7 +109,9 @@ class VodafoneService {
           };
         }
       }
-    } catch (_) {}
+    } catch (_) {} finally {
+      client.close();
+    }
     final info = decodeToken(token)['userInfo'] ?? {};
     return {
       'firstName': info['firstName'] ?? 'Unknown',
@@ -106,7 +125,6 @@ class VodafoneService {
     catch (_) { return 'غير محدد'; }
   }
 
-  // نفس الهيدرز بالظبط زي البوت
   static final Map<String, String> _chatHeaders = {
     'User-Agent': 'Mozilla/5.0 (Linux; Android 13; Xiaomi Build/SKQ1.210216.001) AppleWebKit/537.36',
     'Accept': 'application/json, text/plain, */*',
@@ -123,12 +141,21 @@ class VodafoneService {
     'Accept-Language': 'ar,ar-EG;q=0.9,en-US;q=0.8,en;q=0.7',
   };
 
+  static Map<String, String> get _chatHeadersWithJson {
+    final h = Map<String, String>.from(_chatHeaders);
+    h['Content-Type'] = 'application/json';
+    return h;
+  }
+
   static Future<String> createChatSession() async {
-    final r = await http.get(
-      Uri.parse('https://chat.vodafone.com.eg/genesys/1/service/Chat2'),
-      headers: _chatHeaders,
-    ).timeout(const Duration(seconds: 15));
-    return jsonDecode(r.body)['_id'];
+    final client = _client();
+    try {
+      final r = await client.get(
+        Uri.parse('https://chat.vodafone.com.eg/genesys/1/service/Chat2'),
+        headers: _chatHeaders,
+      ).timeout(const Duration(seconds: 15));
+      return jsonDecode(r.body)['_id'];
+    } finally { client.close(); }
   }
 
   static Future<void> joinChat({
@@ -138,64 +165,67 @@ class VodafoneService {
     required String phone,
     required String tariff,
   }) async {
-    final h = Map<String, String>.from(_chatHeaders);
-    h['Content-Type'] = 'application/json';
-    await http.post(
-      Uri.parse('https://chat.vodafone.com.eg/genesys/1/service/$chatId/ixn/chat'),
-      headers: h,
-      body: jsonEncode({
-        'subject': 'ES_1_mobile_es',
-        'FirstName': firstName,
-        'LastName': lastName,
-        'EmailAddress': '',
-        'UserName': '',
-        'LoggedIn': 'True',
-        'transcriptEmailAddress': 'True',
-        'message': 'hi-test-dev team',
-        'TopicSelected': 'Chat_Contactus_ar',
-        'MSISDN': phone,
-        '_verbose': 'True',
-        'Language': 'ar',
-        'CustomerValue': '',
-        'RatePlan': tariff,
-        'Channel_name': 'app',
-        'Transfer_test': 'No',
-        'Source': 'FlexBot',
-      }),
-    ).timeout(const Duration(seconds: 15));
+    final client = _client();
+    try {
+      await client.post(
+        Uri.parse('https://chat.vodafone.com.eg/genesys/1/service/$chatId/ixn/chat'),
+        headers: _chatHeadersWithJson,
+        body: jsonEncode({
+          'subject': 'ES_1_mobile_es',
+          'FirstName': firstName,
+          'LastName': lastName,
+          'EmailAddress': '',
+          'UserName': '',
+          'LoggedIn': 'True',
+          'transcriptEmailAddress': 'True',
+          'message': 'hi-test-dev team',
+          'TopicSelected': 'Chat_Contactus_ar',
+          'MSISDN': phone,
+          '_verbose': 'True',
+          'Language': 'ar',
+          'CustomerValue': '',
+          'RatePlan': tariff,
+          'Channel_name': 'app',
+          'Transfer_test': 'No',
+          'Source': 'FlexBot',
+        }),
+      ).timeout(const Duration(seconds: 15));
+    } finally { client.close(); }
   }
 
-  // نفس طريقة البوت بالظبط — params كـ query string + body منفصل
   static Future<Map<String, dynamic>> refreshChat(String chatId, int position) async {
-    final h = Map<String, String>.from(_chatHeaders);
-    h['Content-Type'] = 'application/json';
-    final uri = Uri.parse(
-      'https://chat.vodafone.com.eg/genesys/1/service/$chatId/ixn/chat/refresh',
-    ).replace(queryParameters: {'transcriptPosition': position.toString()});
-    final r = await http.post(uri, headers: h, body: jsonEncode({}))
-        .timeout(const Duration(seconds: 30));
-    return jsonDecode(r.body);
+    final client = _client();
+    try {
+      final uri = Uri.parse(
+        'https://chat.vodafone.com.eg/genesys/1/service/$chatId/ixn/chat/refresh',
+      ).replace(queryParameters: {'transcriptPosition': position.toString()});
+      final r = await client.post(uri,
+        headers: _chatHeadersWithJson,
+        body: jsonEncode({}),
+      ).timeout(const Duration(seconds: 30));
+      return jsonDecode(r.body);
+    } finally { client.close(); }
   }
 
   static Future<void> sendMessage(String chatId, String message) async {
-    final h = Map<String, String>.from(_chatHeaders);
-    h['Content-Type'] = 'application/json';
-    await http.post(
-      Uri.parse('https://chat.vodafone.com.eg/genesys/1/service/$chatId/ixn/chat/send'),
-      headers: h,
-      body: jsonEncode({'message': message}),
-    ).timeout(const Duration(seconds: 15));
+    final client = _client();
+    try {
+      await client.post(
+        Uri.parse('https://chat.vodafone.com.eg/genesys/1/service/$chatId/ixn/chat/send'),
+        headers: _chatHeadersWithJson,
+        body: jsonEncode({'message': message}),
+      ).timeout(const Duration(seconds: 15));
+    } finally { client.close(); }
   }
 
   static Future<void> disconnect(String chatId) async {
+    final client = _client();
     try {
-      final h = Map<String, String>.from(_chatHeaders);
-      h['Content-Type'] = 'application/json';
-      await http.post(
+      await client.post(
         Uri.parse('https://chat.vodafone.com.eg/genesys/1/service/$chatId/ixn/chat/disconnect'),
-        headers: h,
+        headers: _chatHeadersWithJson,
         body: jsonEncode({'_verbose': 'True'}),
       ).timeout(const Duration(seconds: 10));
-    } catch (_) {}
+    } catch (_) {} finally { client.close(); }
   }
 }
